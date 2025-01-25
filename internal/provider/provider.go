@@ -443,6 +443,10 @@ func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclie
 		if logging != nil {
 			createContainer.Logging.Set(logging)
 		}
+		priority, err := p.getContainerPriority(pod)
+		if err == nil && priority != nil {
+			createContainer.Priority.Set(priority)
+		}
 		creteContainersArray = append(creteContainersArray, *createContainer)
 	}
 	return creteContainersArray
@@ -658,7 +662,6 @@ func (p *SaladCloudProvider) createContainerGroup(createContainerList []saladcli
 		createContainerGroups = append(createContainerGroups, createContainerGroupRequest)
 	}
 	return createContainerGroups
-
 }
 
 func (p *SaladCloudProvider) getGPUClasses(pod *corev1.Pod) ([]string, error) {
@@ -789,4 +792,13 @@ func (p *SaladCloudProvider) getContainerLogging(pod *corev1.Pod) *saladclient.C
 		}
 	}
 	return containerLogging
+}
+
+func (p *SaladCloudProvider) getContainerPriority(pod *corev1.Pod) (*saladclient.ContainerGroupPriority, error) {
+	priority, ok := pod.ObjectMeta.Annotations["salad.com/container-group-priority"]
+	if !ok {
+		return nil, nil
+	}
+
+	return saladclient.NewContainerGroupPriorityFromValue(priority)
 }
