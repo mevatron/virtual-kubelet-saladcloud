@@ -5,7 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	saladclient "github.com/lucklypriyansh-2/salad-client"
+	saladclient "github.com/mevatron/salad-client"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -58,7 +58,7 @@ func GetPodPhaseFromContainerGroupState(containerGroupState saladclient.Containe
 		return corev1.PodPending
 	case saladclient.CONTAINERGROUPSTATUS_RUNNING:
 		{
-			if containerGroupState.InstanceStatusCount.RunningCount > 0 {
+			if containerGroupState.InstanceStatusCounts.RunningCount > 0 {
 				return corev1.PodRunning
 			}
 			return corev1.PodPending

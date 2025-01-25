@@ -42,3 +42,4 @@ go.work
 ## Custom Rules
 
 bin/
+.idea/

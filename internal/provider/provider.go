@@ -11,7 +11,7 @@ import (
 	"github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/models"
 	"github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/utils"
 	"github.com/google/uuid"
-	saladclient "github.com/lucklypriyansh-2/salad-client"
+	saladclient "github.com/mevatron/salad-client"
 	"github.com/pkg/errors"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
@@ -73,7 +73,7 @@ func (p *SaladCloudProvider) setNodeCapacity() {
 	p.operatingSystem = defaultOperatingSystem
 }
 
-func (p *SaladCloudProvider) ConfigureNode(ctx context.Context, node *corev1.Node) {
+func (p *SaladCloudProvider) ConfigureNode(_ context.Context, node *corev1.Node) {
 	node.Status.Capacity = p.getNodeCapacity()
 	node.Status.Allocatable = p.getNodeCapacity()
 	node.Status.NodeInfo.OperatingSystem = p.operatingSystem
@@ -193,7 +193,7 @@ func (p *SaladCloudProvider) CreatePod(ctx context.Context, pod *corev1.Pod) err
 	return nil
 }
 
-func (p *SaladCloudProvider) UpdatePod(ctx context.Context, pod *corev1.Pod) error {
+func (p *SaladCloudProvider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
 	p.logger.Debugf("UpdatePod: %s: %+v", utils.GetPodName(pod.Namespace, pod.Name, pod), pod)
 	return nil
 }
@@ -231,7 +231,7 @@ func (p *SaladCloudProvider) DeletePod(ctx context.Context, pod *corev1.Pod) err
 	return nil
 }
 
-func (p *SaladCloudProvider) GetPod(ctx context.Context, namespace string, name string) (*corev1.Pod, error) {
+func (p *SaladCloudProvider) GetPod(_ context.Context, namespace string, name string) (*corev1.Pod, error) {
 	podname := utils.GetPodName(namespace, name, nil)
 	resp, r, err := saladclient.NewAPIClient(saladclient.NewConfiguration()).ContainerGroupsAPI.GetContainerGroup(p.contextWithAuth(), p.inputVars.OrganizationName, p.inputVars.ProjectName, podname).Execute()
 	if err != nil {
@@ -327,7 +327,7 @@ func (p *SaladCloudProvider) GetPodStatus(ctx context.Context, namespace string,
 
 }
 
-func (p *SaladCloudProvider) GetPods(ctx context.Context) ([]*corev1.Pod, error) {
+func (p *SaladCloudProvider) GetPods(_ context.Context) ([]*corev1.Pod, error) {
 	resp, r, err := p.apiClient.ContainerGroupsAPI.ListContainerGroups(p.contextWithAuth(), p.inputVars.OrganizationName, p.inputVars.ProjectName).Execute()
 	if err != nil {
 		// Get response body for error info
@@ -371,7 +371,7 @@ func (p *SaladCloudProvider) GetPods(ctx context.Context) ([]*corev1.Pod, error)
 	return pods, nil
 }
 
-func (p *SaladCloudProvider) GetContainerLogs(ctx context.Context, namespace, podName, containerName string, opts nodeapi.ContainerLogOpts) (io.ReadCloser, error) {
+func (p *SaladCloudProvider) GetContainerLogs(_ context.Context, namespace, podName, containerName string, opts nodeapi.ContainerLogOpts) (io.ReadCloser, error) {
 	return nil, nil
 }
 
@@ -379,7 +379,7 @@ func (p *SaladCloudProvider) RunInContainer(ctx context.Context, namespace, podN
 	return nil
 }
 
-func (p *SaladCloudProvider) AttachToContainer(ctx context.Context, namespace, podName, containerName string, attach nodeapi.AttachIO) error {
+func (p *SaladCloudProvider) AttachToContainer(_ context.Context, namespace, podName, containerName string, attach nodeapi.AttachIO) error {
 	return nil
 }
 
@@ -448,23 +448,190 @@ func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclie
 	return creteContainersArray
 }
 
+func (p *SaladCloudProvider) getWorkloadContainerLivenessProbeFrom(
+	k8sProbe *corev1.Probe,
+) (*saladclient.NullableContainerGroupLivenessProbe, error) {
+
+	if k8sProbe == nil || *k8sProbe == (corev1.Probe{}) {
+		// No probe specified.
+		return nil, nil
+	}
+
+	// Create the typed LivenessProbe:
+	probe := saladclient.NewContainerGroupLivenessProbe(
+		k8sProbe.InitialDelaySeconds,
+		k8sProbe.PeriodSeconds,
+		k8sProbe.TimeoutSeconds,
+		k8sProbe.SuccessThreshold,
+		k8sProbe.FailureThreshold,
+	)
+
+	// Fill in gRPC details if present:
+	if k8sProbe.GRPC != nil {
+		grpcProbe := saladclient.NewContainerGroupProbeGrpc(*k8sProbe.GRPC.Service, k8sProbe.GRPC.Port)
+		probe.SetGrpc(*grpcProbe)
+	}
+
+	// Fill in HTTP details if present:
+	if k8sProbe.HTTPGet != nil {
+		httpProbe := saladclient.NewContainerGroupProbeHttp(
+			k8sProbe.HTTPGet.Path,
+			int32(k8sProbe.HTTPGet.Port.IntValue()),
+		)
+		for _, header := range k8sProbe.HTTPGet.HTTPHeaders {
+			httpProbe.Headers = append(httpProbe.Headers,
+				saladclient.HttpHeadersInner{Name: header.Name, Value: header.Value})
+		}
+		probe.SetHttp(*httpProbe)
+	}
+
+	// Fill in TCP details if present:
+	if k8sProbe.TCPSocket != nil {
+		tcpProbe := saladclient.NewContainerGroupProbeTcp(
+			int32(k8sProbe.TCPSocket.Port.IntValue()),
+		)
+		probe.SetTcp(*tcpProbe)
+	}
+
+	// Fill in Exec details if present:
+	if k8sProbe.Exec != nil {
+		execProbe := saladclient.NewContainerGroupProbeExec(k8sProbe.Exec.Command)
+		probe.SetExec(*execProbe)
+	}
+
+	// Wrap in nullable and return
+	return saladclient.NewNullableContainerGroupLivenessProbe(probe), nil
+}
+
+func (p *SaladCloudProvider) getWorkloadContainerReadinessProbeFrom(
+	k8sProbe *corev1.Probe,
+) (*saladclient.NullableContainerGroupReadinessProbe, error) {
+
+	if k8sProbe == nil || *k8sProbe == (corev1.Probe{}) {
+		return nil, nil
+	}
+
+	// Create the typed ReadinessProbe:
+	probe := saladclient.NewContainerGroupReadinessProbe(
+		k8sProbe.InitialDelaySeconds,
+		k8sProbe.PeriodSeconds,
+		k8sProbe.TimeoutSeconds,
+		k8sProbe.SuccessThreshold,
+		k8sProbe.FailureThreshold,
+	)
+
+	// Optional gRPC:
+	if k8sProbe.GRPC != nil {
+		grpcProbe := saladclient.NewContainerGroupProbeGrpc(*k8sProbe.GRPC.Service, k8sProbe.GRPC.Port)
+		probe.SetGrpc(*grpcProbe)
+	}
+
+	// Optional HTTP:
+	if k8sProbe.HTTPGet != nil {
+		httpProbe := saladclient.NewContainerGroupProbeHttp(
+			k8sProbe.HTTPGet.Path,
+			int32(k8sProbe.HTTPGet.Port.IntValue()),
+		)
+		for _, header := range k8sProbe.HTTPGet.HTTPHeaders {
+			httpProbe.Headers = append(httpProbe.Headers,
+				saladclient.HttpHeadersInner{Name: header.Name, Value: header.Value})
+		}
+		probe.SetHttp(*httpProbe)
+	}
+
+	// Optional TCP:
+	if k8sProbe.TCPSocket != nil {
+		tcpProbe := saladclient.NewContainerGroupProbeTcp(
+			int32(k8sProbe.TCPSocket.Port.IntValue()),
+		)
+		probe.SetTcp(*tcpProbe)
+	}
+
+	// Optional Exec:
+	if k8sProbe.Exec != nil {
+		execProbe := saladclient.NewContainerGroupProbeExec(k8sProbe.Exec.Command)
+		probe.SetExec(*execProbe)
+	}
+
+	return saladclient.NewNullableContainerGroupReadinessProbe(probe), nil
+}
+
+func (p *SaladCloudProvider) getWorkloadContainerStartupProbeFrom(
+	k8sProbe *corev1.Probe,
+) (*saladclient.NullableContainerGroupStartupProbe, error) {
+
+	if k8sProbe == nil || *k8sProbe == (corev1.Probe{}) {
+		return nil, nil
+	}
+
+	// Create the typed StartupProbe:
+	probe := saladclient.NewContainerGroupStartupProbe(
+		k8sProbe.InitialDelaySeconds,
+		k8sProbe.PeriodSeconds,
+		k8sProbe.TimeoutSeconds,
+		k8sProbe.SuccessThreshold,
+		k8sProbe.FailureThreshold,
+	)
+
+	// gRPC:
+	if k8sProbe.GRPC != nil {
+		grpcProbe := saladclient.NewContainerGroupProbeGrpc(*k8sProbe.GRPC.Service, k8sProbe.GRPC.Port)
+		probe.SetGrpc(*grpcProbe)
+	}
+
+	// HTTP:
+	if k8sProbe.HTTPGet != nil {
+		httpProbe := saladclient.NewContainerGroupProbeHttp(
+			k8sProbe.HTTPGet.Path,
+			int32(k8sProbe.HTTPGet.Port.IntValue()),
+		)
+		for _, header := range k8sProbe.HTTPGet.HTTPHeaders {
+			httpProbe.Headers = append(httpProbe.Headers,
+				saladclient.HttpHeadersInner{Name: header.Name, Value: header.Value})
+		}
+		probe.SetHttp(*httpProbe)
+	}
+
+	// TCP:
+	if k8sProbe.TCPSocket != nil {
+		tcpProbe := saladclient.NewContainerGroupProbeTcp(
+			int32(k8sProbe.TCPSocket.Port.IntValue()),
+		)
+		probe.SetTcp(*tcpProbe)
+	}
+
+	// Exec:
+	if k8sProbe.Exec != nil {
+		execProbe := saladclient.NewContainerGroupProbeExec(k8sProbe.Exec.Command)
+		probe.SetExec(*execProbe)
+	}
+
+	return saladclient.NewNullableContainerGroupStartupProbe(probe), nil
+}
+
 func (p *SaladCloudProvider) createContainerGroup(createContainerList []saladclient.CreateContainer, pod *corev1.Pod) []saladclient.CreateContainerGroup {
 	createContainerGroups := make([]saladclient.CreateContainerGroup, 0)
 	for _, container := range createContainerList {
-		createContainerGroupRequest := *saladclient.NewCreateContainerGroup(utils.GetPodName(pod.Namespace, pod.Name, pod), container, "always", 1)
-		readinessProbe, err := p.getWorkloadContainerProbeFrom(pod.Spec.Containers[0].ReadinessProbe)
+		createContainerGroupRequest := *saladclient.NewCreateContainerGroup(
+			utils.GetPodName(pod.Namespace, pod.Name, pod),
+			container,
+			true,
+			saladclient.CONTAINERRESTARTPOLICY_ALWAYS,
+			int32(1),
+		)
+		readinessProbe, err := p.getWorkloadContainerReadinessProbeFrom(pod.Spec.Containers[0].ReadinessProbe)
 		if err == nil && readinessProbe != nil {
 			createContainerGroupRequest.ReadinessProbe = *readinessProbe
 		} else {
 			log.G(context.Background()).Errorf("Failed to get readinessProbe ", err)
 		}
-		livenessProbe, err := p.getWorkloadContainerProbeFrom(pod.Spec.Containers[0].LivenessProbe)
+		livenessProbe, err := p.getWorkloadContainerLivenessProbeFrom(pod.Spec.Containers[0].LivenessProbe)
 		if err == nil && livenessProbe != nil {
 			createContainerGroupRequest.LivenessProbe = *livenessProbe
 		} else {
 			log.G(context.Background()).Errorf("Failed to get livenessProbe ", err)
 		}
-		startupProbe, err := p.getWorkloadContainerProbeFrom(pod.Spec.Containers[0].StartupProbe)
+		startupProbe, err := p.getWorkloadContainerStartupProbeFrom(pod.Spec.Containers[0].StartupProbe)
 		if err == nil && startupProbe != nil {
 			createContainerGroupRequest.StartupProbe = *startupProbe
 		} else {
@@ -492,34 +659,6 @@ func (p *SaladCloudProvider) createContainerGroup(createContainerList []saladcli
 	}
 	return createContainerGroups
 
-}
-
-func (p *SaladCloudProvider) getWorkloadContainerProbeFrom(k8sProbe *corev1.Probe) (*saladclient.NullableContainerGroupProbe, error) {
-	if k8sProbe == nil || *k8sProbe == (corev1.Probe{}) {
-		return nil, nil
-	}
-	probe := saladclient.NewContainerGroupProbe(k8sProbe.InitialDelaySeconds, k8sProbe.PeriodSeconds, k8sProbe.TimeoutSeconds, k8sProbe.SuccessThreshold, k8sProbe.FailureThreshold)
-	if k8sProbe.GRPC != nil {
-		grpcProbe := saladclient.NewContainerGroupProbeGrpc(*k8sProbe.GRPC.Service, k8sProbe.GRPC.Port)
-		probe.SetGrpc(*grpcProbe)
-	}
-	if k8sProbe.HTTPGet != nil {
-		httpProbe := saladclient.NewContainerGroupProbeHttp(k8sProbe.HTTPGet.Path, int32(k8sProbe.HTTPGet.Port.IntValue()))
-		for _, header := range k8sProbe.HTTPGet.HTTPHeaders {
-			httpProbe.Headers = append(httpProbe.Headers, saladclient.HttpHeadersInner{Name: header.Name, Value: header.Value})
-		}
-		probe.SetHttp(*httpProbe)
-	}
-
-	if k8sProbe.TCPSocket != nil {
-		tcpProbe := saladclient.NewContainerGroupProbeTcp(int32(k8sProbe.TCPSocket.Port.IntValue()))
-		probe.SetTcp(*tcpProbe)
-	}
-	if k8sProbe.Exec != nil {
-		exec := saladclient.NewContainerGroupProbeExec(k8sProbe.Exec.Command)
-		probe.SetExec(*exec)
-	}
-	return saladclient.NewNullableContainerGroupProbe(probe), nil
 }
 
 func (p *SaladCloudProvider) getGPUClasses(pod *corev1.Pod) ([]string, error) {
