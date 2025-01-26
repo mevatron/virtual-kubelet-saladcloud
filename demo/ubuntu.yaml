@@ -34,7 +34,7 @@ spec:
               memory: 8Gi
           readinessProbe:
             exec:
-              command: [ "cat", "/health" ]
+              command: [ "cat", "/healthy" ]
             initialDelaySeconds: 3
             failureThreshold: 3
             periodSeconds: 1
