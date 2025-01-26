@@ -43,3 +43,5 @@ go.work
 
 bin/
 .idea/
+.aider*
+/.env

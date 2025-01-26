@@ -140,30 +140,10 @@ func (p *SaladCloudProvider) CreatePod(ctx context.Context, pod *corev1.Pod) err
 		return err
 	}
 
-	// wait for 3 second
-	time.Sleep(3 * time.Second)
-
-	startHttpResponse, err := p.apiClient.ContainerGroupsAPI.StartContainerGroup(p.contextWithAuth(), p.inputVars.OrganizationName, p.inputVars.ProjectName, utils.GetPodName(pod.Namespace, pod.Name, nil)).Execute()
-	if err != nil {
-		// Get response body for error info
-		pd, err := utils.GetResponseBody(startHttpResponse)
-		if err != nil {
-			p.logger.Errorf("`ContainerGroupsAPI.StartContainerGroup`: %s", err)
-			return err
-		}
-
-		p.logger.Errorf("`ContainerGroupsAPI.StartContainerGroup`: Error: %+v", *pd)
-		err = p.DeletePod(ctx, pod)
-		if err != nil {
-			return err
-		}
-		return err
-	}
-
 	now := metav1.NewTime(time.Now())
 	pod.ObjectMeta.CreationTimestamp = now
 	pod.Status = corev1.PodStatus{
-		Phase:     corev1.PodRunning,
+		Phase:     corev1.PodPending,
 		StartTime: &now,
 		Conditions: []corev1.PodCondition{
 			{
@@ -324,7 +304,6 @@ func (p *SaladCloudProvider) GetPodStatus(ctx context.Context, namespace string,
 			},
 		},
 	}, nil
-
 }
 
 func (p *SaladCloudProvider) GetPods(_ context.Context) ([]*corev1.Pod, error) {

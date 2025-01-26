@@ -2,6 +2,7 @@ package utils
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -38,7 +39,6 @@ func GetPodResource(podSpec corev1.PodSpec) (cpu int64, memory int64) {
 }
 
 func GetPodName(nameSpace, containerGroup string, pod *corev1.Pod) string {
-
 	if nameSpace == "" {
 		nameSpace = pod.ObjectMeta.Namespace
 	}
@@ -52,7 +52,6 @@ func GetPodName(nameSpace, containerGroup string, pod *corev1.Pod) string {
 }
 
 func GetPodPhaseFromContainerGroupState(containerGroupState saladclient.ContainerGroupState) corev1.PodPhase {
-
 	switch containerGroupState.Status {
 	case saladclient.CONTAINERGROUPSTATUS_PENDING:
 		return corev1.PodPending
@@ -79,9 +78,16 @@ func GetPodPhaseFromContainerGroupState(containerGroupState saladclient.Containe
 }
 
 func GetResponseBody(response *http.Response) (*saladclient.ProblemDetails, error) {
+	if response == nil {
+		return nil, fmt.Errorf("response was nil")
+	}
+
 	// Get response body for error info
 	body, _ := io.ReadAll(response.Body)
-	response.Body.Close()
+	closeErr := response.Body.Close()
+	if closeErr != nil {
+		return nil, closeErr
+	}
 	response.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	// Get a ProblemDetails struct from the body
