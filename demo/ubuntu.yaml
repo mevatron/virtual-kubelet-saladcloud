@@ -14,8 +14,8 @@ spec:
     metadata:
       annotations:
         salad.com/country-codes: us
-        salad.com/networking-protocol: "tcp"
-        salad.com/networking-port: "22"
+        salad.com/networking-protocol: "http"
+        salad.com/networking-port: "80"
         salad.com/networking-auth: "false"
         salad.com/gpu-classes: "dec851b7-eba7-4457-a319-a01b611a810e"
         salad.com/container-group-priority: "high"
@@ -23,7 +23,7 @@ spec:
         app: ubuntu-demo
     spec:
       containers:
-        - image: ghcr.io/saladtechnologies/recipe-base-ubuntu:0.1
+        - image: httpd
           name: ubuntu
           resources:
             requests:
@@ -32,13 +32,6 @@ spec:
             limits:
               cpu: "1"
               memory: 8Gi
-          readinessProbe:
-            exec:
-              command: [ "cat", "/healthy" ]
-            initialDelaySeconds: 3
-            failureThreshold: 3
-            periodSeconds: 1
-            timeoutSeconds: 1
       nodeSelector:
         kubernetes.io/role: agent
         type: virtual-kubelet

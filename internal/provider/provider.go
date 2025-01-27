@@ -3,6 +3,9 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"io"
 	"strconv"
 	"strings"
@@ -292,15 +295,32 @@ func (p *SaladCloudProvider) GetPodStatus(ctx context.Context, namespace string,
 		return nil, models.NewSaladCloudError(err, response)
 	}
 
+	phase := utils.GetPodPhaseFromContainerGroupState(containerGroup.CurrentState)
+	ready := containerGroup.CurrentState.Status == saladclient.CONTAINERGROUPSTATUS_RUNNING &&
+		containerGroup.CurrentState.InstanceStatusCounts.RunningCount > 0
+	p.logger.Infof("Pod %s computed status - Phase: %v, Ready: %v, Status: %v, RunningCount: %d",
+		podname, phase, ready, containerGroup.CurrentState.Status, containerGroup.CurrentState.InstanceStatusCounts.RunningCount)
+
 	startTime := metav1.NewTime(containerGroup.CreateTime)
 	return &corev1.PodStatus{
-		Phase:     utils.GetPodPhaseFromContainerGroupState(containerGroup.CurrentState),
+		Phase:     phase,
 		StartTime: &startTime,
+		Conditions: []corev1.PodCondition{
+			{
+				Type:   corev1.PodReady,
+				Status: getConditionStatus(ready),
+			},
+			{
+				Type:   corev1.ContainersReady,
+				Status: getConditionStatus(ready),
+			},
+		},
 		ContainerStatuses: []corev1.ContainerStatus{
 			{
 				Name:  containerGroup.Name,
 				Image: containerGroup.Container.Image,
-				Ready: utils.GetPodPhaseFromContainerGroupState(containerGroup.CurrentState) == corev1.PodRunning,
+				Ready: ready,
+				State: getContainerState(containerGroup.CurrentState),
 			},
 		},
 	}, nil
@@ -771,6 +791,28 @@ func (p *SaladCloudProvider) getContainerLogging(pod *corev1.Pod) *saladclient.C
 		}
 	}
 	return containerLogging
+}
+
+func getConditionStatus(ready bool) corev1.ConditionStatus {
+	if ready {
+		return corev1.ConditionTrue
+	}
+	return corev1.ConditionFalse
+}
+
+func getContainerState(state saladclient.ContainerGroupState) corev1.ContainerState {
+	if state.Status == saladclient.CONTAINERGROUPSTATUS_RUNNING &&
+		state.InstanceStatusCounts.RunningCount > 0 {
+		return corev1.ContainerState{
+			Running: &corev1.ContainerStateRunning{},
+		}
+	}
+	return corev1.ContainerState{
+		Waiting: &corev1.ContainerStateWaiting{
+			Reason:  cases.Title(language.English).String(string(state.Status)),
+			Message: fmt.Sprintf("Container group status: %s, running count: %d", state.Status, state.InstanceStatusCounts.RunningCount),
+		},
+	}
 }
 
 func (p *SaladCloudProvider) getContainerPriority(pod *corev1.Pod) (*saladclient.ContainerGroupPriority, error) {
