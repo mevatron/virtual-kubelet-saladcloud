@@ -53,10 +53,11 @@ const (
 
 func NewSaladCloudProvider(ctx context.Context, inputVars models.InputVars, providerConfig nodeutil.ProviderConfig) (*SaladCloudProvider, error) {
 	cloudProvider := &SaladCloudProvider{
-		inputVars: inputVars,
-		apiClient: saladclient.NewAPIClient(saladclient.NewConfiguration()),
-		logger:    log.G(ctx),
-		podLister: providerConfig.Pods,
+		inputVars:    inputVars,
+		apiClient:    saladclient.NewAPIClient(saladclient.NewConfiguration()),
+		logger:       log.G(ctx),
+		podLister:    providerConfig.Pods,
+		secretLister: providerConfig.Secrets,
 	}
 	cloudProvider.setNodeCapacity()
 	cloudProvider.setCountryCodes([]string{"US"})
