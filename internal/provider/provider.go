@@ -40,6 +40,7 @@ type SaladCloudProvider struct {
 	logger          log.Logger
 	podsTracker     *PodsTracker
 	podLister       corev1listers.PodLister
+	secretLister    corev1listers.SecretLister
 }
 
 const (
@@ -425,7 +426,7 @@ func (p *SaladCloudProvider) getContainerEnvironment(podMetadata metav1.ObjectMe
 
 func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclient.CreateContainer {
 	cpu, memory := utils.GetPodResource(pod.Spec)
-	creteContainersArray := make([]saladclient.CreateContainer, 0)
+	createContainersArray := make([]saladclient.CreateContainer, 0)
 	for _, container := range pod.Spec.Containers {
 		containerResourceRequirement := saladclient.NewContainerResourceRequirements(int32(cpu), int32(memory))
 		createContainer := saladclient.NewCreateContainer(container.Image, *containerResourceRequirement)
@@ -446,9 +447,9 @@ func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclie
 		if err == nil && priority != nil {
 			createContainer.Priority.Set(priority)
 		}
-		creteContainersArray = append(creteContainersArray, *createContainer)
+		createContainersArray = append(createContainersArray, *createContainer)
 	}
-	return creteContainersArray
+	return createContainersArray
 }
 
 func (p *SaladCloudProvider) getWorkloadContainerLivenessProbeFrom(
