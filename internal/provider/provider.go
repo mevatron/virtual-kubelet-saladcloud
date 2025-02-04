@@ -436,6 +436,18 @@ func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclie
 		if container.Command != nil {
 			createContainer.SetCommand(container.Command)
 		}
+
+		// Handle image pull secrets
+		if ips, err := p.getImagePullSecrets(pod); err != nil {
+			p.logger.Errorf("Error getting image pull secrets: %v", err)
+		} else if len(ips) > 0 {
+			// SaladCloud currently supports one registry auth per container
+			auth := saladclient.CreateContainerRegistryAuthentication{
+				Basic: saladclient.NewNullableCreateContainerRegistryAuthenticationBasic(&ips[0]),
+			}
+			createContainer.RegistryAuthentication = saladclient.NewNullableCreateContainerRegistryAuthentication(&auth)
+		}
+
 		gpuClasses, err := p.getGPUClasses(pod)
 		if err == nil && gpuClasses != nil && len(gpuClasses) > 0 {
 			createContainer.Resources.SetGpuClasses(gpuClasses)
@@ -815,6 +827,105 @@ func getContainerState(state saladclient.ContainerGroupState) corev1.ContainerSt
 			Message: fmt.Sprintf("Container group status: %s, running count: %d", state.Status, state.InstanceStatusCounts.RunningCount),
 		},
 	}
+}
+
+func (p *SaladCloudProvider) getImagePullSecrets(pod *corev1.Pod) ([]saladclient.CreateContainerRegistryAuthenticationBasic, error) {
+	ips := make([]saladclient.CreateContainerRegistryAuthenticationBasic, 0)
+	
+	for _, ref := range pod.Spec.ImagePullSecrets {
+		secret, err := p.secretLister.Secrets(pod.Namespace).Get(ref.Name)
+		if err != nil {
+			return ips, err
+		}
+
+		switch secret.Type {
+		case corev1.SecretTypeDockercfg:
+			creds, err := p.readDockerCfgSecret(secret)
+			if err != nil {
+				return ips, err
+			}
+			ips = append(ips, creds...)
+		case corev1.SecretTypeDockerConfigJson:
+			creds, err := p.readDockerConfigJSONSecret(secret)
+			if err != nil {
+				return ips, err
+			}
+			ips = append(ips, creds...)
+		default:
+			return nil, fmt.Errorf("unsupported secret type %q for image pull secret", secret.Type)
+		}
+	}
+	return ips, nil
+}
+
+func (p *SaladCloudProvider) readDockerCfgSecret(secret *corev1.Secret) ([]saladclient.CreateContainerRegistryAuthenticationBasic, error) {
+	ips := make([]saladclient.CreateContainerRegistryAuthenticationBasic, 0)
+	repoData, ok := secret.Data[corev1.DockerConfigKey]
+	if !ok {
+		return ips, fmt.Errorf("no dockercfg data in secret")
+	}
+
+	var authConfigs map[string]struct {
+		Auth  string `json:"auth"`
+		Email string `json:"email"`
+	}
+	if err := json.Unmarshal(repoData, &authConfigs); err != nil {
+		return ips, err
+	}
+
+	for server, auth := range authConfigs {
+		decoded, err := base64.StdEncoding.DecodeString(auth.Auth)
+		if err != nil {
+			return ips, fmt.Errorf("error decoding auth for %s: %w", server, err)
+		}
+
+		parts := strings.SplitN(string(decoded), ":", 2)
+		if len(parts) != 2 {
+			return ips, fmt.Errorf("malformed auth for %s", server)
+		}
+
+		ips = append(ips, saladclient.CreateContainerRegistryAuthenticationBasic{
+			Username: parts[0],
+			Password: parts[1],
+		})
+	}
+	return ips, nil
+}
+
+func (p *SaladCloudProvider) readDockerConfigJSONSecret(secret *corev1.Secret) ([]saladclient.CreateContainerRegistryAuthenticationBasic, error) {
+	ips := make([]saladclient.CreateContainerRegistryAuthenticationBasic, 0)
+	repoData, ok := secret.Data[corev1.DockerConfigJsonKey]
+	if !ok {
+		return ips, fmt.Errorf("no dockerconfigjson data in secret")
+	}
+
+	var config struct {
+		Auths map[string]struct {
+			Auth  string `json:"auth"`
+			Email string `json:"email"`
+		} `json:"auths"`
+	}
+	if err := json.Unmarshal(repoData, &config); err != nil {
+		return ips, err
+	}
+
+	for server, auth := range config.Auths {
+		decoded, err := base64.StdEncoding.DecodeString(auth.Auth)
+		if err != nil {
+			return ips, fmt.Errorf("error decoding auth for %s: %w", server, err)
+		}
+
+		parts := strings.SplitN(string(decoded), ":", 2)
+		if len(parts) != 2 {
+			return ips, fmt.Errorf("malformed auth for %s", server)
+		}
+
+		ips = append(ips, saladclient.CreateContainerRegistryAuthenticationBasic{
+			Username: parts[0],
+			Password: parts[1],
+		})
+	}
+	return ips, nil
 }
 
 func (p *SaladCloudProvider) getContainerPriority(pod *corev1.Pod) (*saladclient.ContainerGroupPriority, error) {
