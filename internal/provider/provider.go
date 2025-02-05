@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"golang.org/x/text/cases"
@@ -443,9 +444,9 @@ func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclie
 		} else if len(ips) > 0 {
 			// SaladCloud currently supports one registry auth per container
 			auth := saladclient.CreateContainerRegistryAuthentication{
-				Basic: saladclient.NewNullableCreateContainerRegistryAuthenticationBasic(&ips[0]),
+				Basic: *saladclient.NewNullableCreateContainerRegistryAuthenticationBasic(&ips[0]),
 			}
-			createContainer.RegistryAuthentication = saladclient.NewNullableCreateContainerRegistryAuthentication(&auth)
+			createContainer.RegistryAuthentication = *saladclient.NewNullableCreateContainerRegistryAuthentication(&auth)
 		}
 
 		gpuClasses, err := p.getGPUClasses(pod)
@@ -831,7 +832,7 @@ func getContainerState(state saladclient.ContainerGroupState) corev1.ContainerSt
 
 func (p *SaladCloudProvider) getImagePullSecrets(pod *corev1.Pod) ([]saladclient.CreateContainerRegistryAuthenticationBasic, error) {
 	ips := make([]saladclient.CreateContainerRegistryAuthenticationBasic, 0)
-	
+
 	for _, ref := range pod.Spec.ImagePullSecrets {
 		secret, err := p.secretLister.Secrets(pod.Namespace).Get(ref.Name)
 		if err != nil {
