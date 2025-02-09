@@ -2,14 +2,14 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
-    app: ubuntu-demo
-  name: ubuntu
+    app: web-demo
+  name: web
   namespace: saladcloud-demo
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ubuntu-demo
+      app: web-demo
   template:
     metadata:
       annotations:
@@ -20,11 +20,11 @@ spec:
         salad.com/gpu-classes: "dec851b7-eba7-4457-a319-a01b611a810e"
         salad.com/container-group-priority: "high"
       labels:
-        app: ubuntu-demo
+        app: web-demo
     spec:
       containers:
         - image: httpd
-          name: ubuntu
+          name: web
           resources:
             requests:
               cpu: "1"
