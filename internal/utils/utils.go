@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	saladclient "github.com/mevatron/salad-client"
+	saladclient "github.com/SaladTechnologies/salad-client"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -20,18 +20,18 @@ func roundUpToNearest(value int64, list []int64) int64 {
 	return list[len(list)-1]
 }
 
-// GetPodResource returns the total CPU in rounded cores and memory rounded to gigabytes (GB) for the provided PodSpec.
+// GetPodResource returns the total CPU in rounded cores and memory rounded to gibibytes (GiB) for the provided PodSpec.
 func GetPodResource(podSpec corev1.PodSpec) (cpu int64, memory int64) {
 	allowedCPUValues := []int64{1, 2, 3, 4, 6, 8, 12, 16}
 
-	allowedMemoryValues := []int64{1024, 2048, 3072, 4 * 1024, 6 * 1024, 8 * 1024, 12 * 1024, 16 * 1024, 24 * 1024, 30 * 1024, 38 * 1024, 60 * 1024} // in GB
+	allowedMemoryValues := []int64{1024, 2048, 3072, 4 * 1024, 6 * 1024, 8 * 1024, 12 * 1024, 16 * 1024, 24 * 1024, 30 * 1024, 38 * 1024, 60 * 1024} // in GiB
 
 	for _, container := range podSpec.Containers {
 		// Convert milliCPU to cores and round to nearest value in the list
 		cpuValue := container.Resources.Requests.Cpu().MilliValue() / 1000
 		cpu += roundUpToNearest(cpuValue, allowedCPUValues)
 
-		// Convert bytes to gigabytes (MB) and ensure it's a multiple of 1 Gi (1 Gi = 1024*1024 bytes)
+		// Convert bytes to gibibytes (MiB) and ensure it's a multiple of 1 Gi (1 Gi = 1024*1024 bytes)
 		memValue := container.Resources.Requests.Memory().Value() / (1024 * 1024)
 		memory += roundUpToNearest(memValue, allowedMemoryValues)
 	}

@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
+	saladclient "github.com/SaladTechnologies/salad-client"
 	"github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/models"
 	"github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/utils"
 	"github.com/google/uuid"
-	saladclient "github.com/mevatron/salad-client"
 	"github.com/pkg/errors"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
