@@ -53,15 +53,16 @@ func defaultInputs() models.InputVars {
 	}
 
 	return models.InputVars{
-		NodeName:         "saladcloud-node",
-		KubeConfig:       kubeConfig,
-		LogLevel:         "info",
-		OrganizationName: "",
-		TaintKey:         "virtual-kubelet.io/provider",
-		TaintEffect:      "NoSchedule",
-		TaintValue:       "saladcloud",
-		ProjectName:      "",
-		ApiKey:           "",
+		NodeName:          "saladcloud-node",
+		KubeConfig:        kubeConfig,
+		LogLevel:          "info",
+		OrganizationName:  "",
+		TaintKey:          "virtual-kubelet.io/provider",
+		TaintEffect:       "NoSchedule",
+		TaintValue:        "saladcloud",
+		ProjectName:       "",
+		ApiKey:            "",
+		IgnoredNamespaces: "kube-system,kube-public,kube-node-lease",
 	}
 }
 
@@ -86,6 +87,7 @@ func initCommandFlags() {
 	virtualKubeletCommand.Flags().StringVar(&inputs.ApiKey, "sce-api-key", inputs.ApiKey, "SaladCloud API Key")
 	virtualKubeletCommand.Flags().StringVar(&inputs.OrganizationName, "sce-organization-name", inputs.OrganizationName, "SaladCloud Organization Name")
 	virtualKubeletCommand.Flags().StringVar(&inputs.ProjectName, "sce-project-name", inputs.ProjectName, "SaladCloud Project Name")
+	virtualKubeletCommand.Flags().StringVar(&inputs.IgnoredNamespaces, "ignored-namespaces", inputs.IgnoredNamespaces, "Comma-separated list of namespaces to ignore (pods from these namespaces will not be scheduled)")
 }
 
 func runNode(ctx context.Context) error {
@@ -190,6 +192,8 @@ var virtualKubeletCommand = &cobra.Command{
 				envName = "CLOUD_ORGANIZATION_NAME"
 			case "sce-project-name":
 				envName = "CLOUD_PROJECT_NAME"
+			case "ignored-namespaces":
+				envName = "IGNORED_NAMESPACES"
 			}
 
 			if envName != "" && !f.Changed && v.IsSet(envName) {

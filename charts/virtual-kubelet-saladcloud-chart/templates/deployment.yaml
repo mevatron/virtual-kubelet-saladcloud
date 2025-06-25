@@ -62,6 +62,8 @@ spec:
               value: {{ required ".Values.salad.organizationName is required" .Values.salad.organizationName }}
             - name: SALAD_CLOUD_PROJECT_NAME
               value: {{ required ".Values.salad.projectName is required" .Values.salad.projectName }}
+            - name: SALAD_IGNORED_NAMESPACES
+              value: {{ .Values.salad.ignoredNamespaces | quote }}
             - name: SALAD_VK_LOG_LEVEL
               value: {{ ternary "debug" "info" .Values.salad.debug }}
             {{- if .Values.salad.nodeName }}

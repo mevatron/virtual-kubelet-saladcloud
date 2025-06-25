@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	saladclient "github.com/mevatron/salad-client"
+	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	"io"
 	"net/http"
 	"strconv"
@@ -32,18 +33,19 @@ import (
 )
 
 type SaladCloudProvider struct {
-	inputVars       models.InputVars
-	cpu             string
-	memory          string
-	pods            string
-	storage         string
-	operatingSystem string
-	apiClient       *saladclient.APIClient
-	countryCodes    []saladclient.CountryCode
-	logger          log.Logger
-	podsTracker     *PodsTracker
-	podLister       corev1listers.PodLister
-	secretLister    corev1listers.SecretLister
+	inputVars         models.InputVars
+	cpu               string
+	memory            string
+	pods              string
+	storage           string
+	operatingSystem   string
+	apiClient         *saladclient.APIClient
+	countryCodes      []saladclient.CountryCode
+	logger            log.Logger
+	podsTracker       *PodsTracker
+	podLister         corev1listers.PodLister
+	secretLister      corev1listers.SecretLister
+	ignoredNamespaces []string
 }
 
 const (
@@ -61,16 +63,41 @@ const (
 )
 
 func NewSaladCloudProvider(ctx context.Context, inputVars models.InputVars, providerConfig nodeutil.ProviderConfig) (*SaladCloudProvider, error) {
+	var ignoredNamespaces []string
+	if inputVars.IgnoredNamespaces != "" {
+		namespaces := strings.Split(inputVars.IgnoredNamespaces, ",")
+		for _, ns := range namespaces {
+			trimmed := strings.TrimSpace(ns)
+			if trimmed != "" {
+				ignoredNamespaces = append(ignoredNamespaces, trimmed)
+			}
+		}
+	}
+
 	cloudProvider := &SaladCloudProvider{
-		inputVars:    inputVars,
-		apiClient:    saladclient.NewAPIClient(saladclient.NewConfiguration()),
-		logger:       log.G(ctx),
-		podLister:    providerConfig.Pods,
-		secretLister: providerConfig.Secrets,
+		inputVars:         inputVars,
+		apiClient:         saladclient.NewAPIClient(saladclient.NewConfiguration()),
+		logger:            log.G(ctx),
+		podLister:         providerConfig.Pods,
+		secretLister:      providerConfig.Secrets,
+		ignoredNamespaces: ignoredNamespaces,
 	}
 	cloudProvider.setNodeCapacity()
 
+	if len(ignoredNamespaces) > 0 {
+		cloudProvider.logger.Infof("Ignoring pods from namespaces: %v", ignoredNamespaces)
+	}
+
 	return cloudProvider, nil
+}
+
+func (p *SaladCloudProvider) shouldIgnoreNamespace(namespace string) bool {
+	for _, ignoredNs := range p.ignoredNamespaces {
+		if namespace == ignoredNs {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *SaladCloudProvider) setNodeCapacity() {
@@ -140,6 +167,12 @@ func (p *SaladCloudProvider) logApiError(op string, resp *http.Response, origErr
 func (p *SaladCloudProvider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	_, span := trace.StartSpan(ctx, "CreatePod")
 	defer span.End()
+
+	if p.shouldIgnoreNamespace(pod.Namespace) {
+		p.logger.Infof("Ignoring pod %s from namespace %s", pod.Name, pod.Namespace)
+		return nil
+	}
+
 	p.logger.Infof("CreatePod: %s", pod.Name)
 	createContainerObject := p.createContainersObject(pod)
 	p.logger.Debugf(" createContainerObject: %+v", createContainerObject)
@@ -191,6 +224,11 @@ func (p *SaladCloudProvider) CreatePod(ctx context.Context, pod *corev1.Pod) err
 }
 
 func (p *SaladCloudProvider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
+	if p.shouldIgnoreNamespace(pod.Namespace) {
+		p.logger.Debugf("Ignoring update request for pod %s from namespace %s", pod.Name, pod.Namespace)
+		return nil
+	}
+
 	p.logger.Debugf("UpdatePod: %s: %+v", utils.GetPodName(pod.Namespace, pod.Name, pod), pod)
 	return nil
 }
@@ -198,6 +236,12 @@ func (p *SaladCloudProvider) UpdatePod(_ context.Context, pod *corev1.Pod) error
 func (p *SaladCloudProvider) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	_, span := trace.StartSpan(ctx, "DeletePod")
 	defer span.End()
+
+	if p.shouldIgnoreNamespace(pod.Namespace) {
+		p.logger.Infof("Ignoring delete request for pod %s from namespace %s", pod.Name, pod.Namespace)
+		return nil
+	}
+
 	p.logger.Debugf("Deleting pod %s", utils.GetPodName(pod.Namespace, pod.Name, pod))
 	response, err := p.apiClient.ContainerGroupsAPI.DeleteContainerGroup(p.contextWithAuth(), p.inputVars.OrganizationName, p.inputVars.ProjectName, utils.GetPodName(pod.Namespace, pod.Name, pod)).Execute()
 	pod.Status.Phase = corev1.PodSucceeded
@@ -221,6 +265,11 @@ func (p *SaladCloudProvider) DeletePod(ctx context.Context, pod *corev1.Pod) err
 }
 
 func (p *SaladCloudProvider) GetPod(_ context.Context, namespace string, name string) (*corev1.Pod, error) {
+	if p.shouldIgnoreNamespace(namespace) {
+		p.logger.Debugf("Ignoring get request for pod %s from namespace %s", name, namespace)
+		return nil, errdefs.NotFound("pod not found") // Return not found for ignored namespaces
+	}
+
 	podname := utils.GetPodName(namespace, name, nil)
 	resp, r, err := saladclient.NewAPIClient(saladclient.NewConfiguration()).ContainerGroupsAPI.GetContainerGroup(p.contextWithAuth(), p.inputVars.OrganizationName, p.inputVars.ProjectName, podname).Execute()
 	if err != nil {
@@ -266,6 +315,11 @@ func (p *SaladCloudProvider) contextWithAuth() context.Context {
 func (p *SaladCloudProvider) GetPodStatus(ctx context.Context, namespace string, name string) (*corev1.PodStatus, error) {
 	_, span := trace.StartSpan(ctx, "GetPodStatus")
 	defer span.End()
+
+	if p.shouldIgnoreNamespace(namespace) {
+		p.logger.Debugf("Ignoring get status request for pod %s from namespace %s", name, namespace)
+		return nil, errdefs.NotFound("pod not found") // Return not found for ignored namespaces
+	}
 
 	podname := utils.GetPodName(namespace, name, nil)
 	containerGroup, response, err := p.apiClient.ContainerGroupsAPI.
