@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	saladclient "github.com/mevatron/salad-client"
-	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	"io"
 	"net/http"
 	"strconv"
@@ -164,12 +163,78 @@ func (p *SaladCloudProvider) logApiError(op string, resp *http.Response, origErr
 	return errors.Join(fmt.Errorf("%s", op), origErr)
 }
 
+// createIgnoredPodStatus creates a consistent status for pods in ignored namespaces
+func (p *SaladCloudProvider) createIgnoredPodStatus(state string) corev1.PodStatus {
+	now := metav1.Now()
+
+	switch state {
+	case "terminated":
+		return corev1.PodStatus{
+			Phase:  corev1.PodSucceeded,
+			Reason: "VirtualKubeletIgnored",
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  "ignored",
+				Image: "none",
+				Ready: false,
+				State: corev1.ContainerState{
+					Terminated: &corev1.ContainerStateTerminated{
+						Message:    "SaladCloud provider intentionally ignores this namespace",
+						FinishedAt: now,
+						Reason:     "VirtualKubeletIgnored",
+						ExitCode:   0,
+					},
+				},
+			}},
+		}
+	default: // "waiting" state
+		return corev1.PodStatus{
+			Phase:     corev1.PodPending,
+			StartTime: &now,
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.PodInitialized, Status: corev1.ConditionTrue},
+				{Type: corev1.PodScheduled, Status: corev1.ConditionTrue},
+				{Type: corev1.PodReady, Status: corev1.ConditionFalse},
+				{Type: corev1.ContainersReady, Status: corev1.ConditionFalse},
+			},
+			ContainerStatuses: []corev1.ContainerStatus{{
+				Name:  "ignored",
+				Image: "none",
+				Ready: false,
+				State: corev1.ContainerState{
+					Waiting: &corev1.ContainerStateWaiting{
+						Reason:  "VirtualKubeletIgnored",
+						Message: "SaladCloud provider intentionally ignores this namespace",
+					},
+				},
+			}},
+		}
+	}
+}
+
+// createIgnoredPod creates a complete fake pod for ignored namespaces
+func (p *SaladCloudProvider) createIgnoredPod(namespace, name string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name:  "ignored",
+				Image: "none",
+			}},
+		},
+		Status: p.createIgnoredPodStatus("waiting"),
+	}
+}
+
 func (p *SaladCloudProvider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	_, span := trace.StartSpan(ctx, "CreatePod")
 	defer span.End()
 
 	if p.shouldIgnoreNamespace(pod.Namespace) {
 		p.logger.Infof("Ignoring pod %s from namespace %s", pod.Name, pod.Namespace)
+		pod.Status = p.createIgnoredPodStatus("waiting")
 		return nil
 	}
 
@@ -226,6 +291,7 @@ func (p *SaladCloudProvider) CreatePod(ctx context.Context, pod *corev1.Pod) err
 func (p *SaladCloudProvider) UpdatePod(_ context.Context, pod *corev1.Pod) error {
 	if p.shouldIgnoreNamespace(pod.Namespace) {
 		p.logger.Debugf("Ignoring update request for pod %s from namespace %s", pod.Name, pod.Namespace)
+		pod.Status = p.createIgnoredPodStatus("waiting")
 		return nil
 	}
 
@@ -239,6 +305,7 @@ func (p *SaladCloudProvider) DeletePod(ctx context.Context, pod *corev1.Pod) err
 
 	if p.shouldIgnoreNamespace(pod.Namespace) {
 		p.logger.Infof("Ignoring delete request for pod %s from namespace %s", pod.Name, pod.Namespace)
+		pod.Status = p.createIgnoredPodStatus("terminated")
 		return nil
 	}
 
@@ -266,8 +333,8 @@ func (p *SaladCloudProvider) DeletePod(ctx context.Context, pod *corev1.Pod) err
 
 func (p *SaladCloudProvider) GetPod(_ context.Context, namespace string, name string) (*corev1.Pod, error) {
 	if p.shouldIgnoreNamespace(namespace) {
-		p.logger.Debugf("Ignoring get request for pod %s from namespace %s", name, namespace)
-		return nil, errdefs.NotFound("pod not found") // Return not found for ignored namespaces
+		p.logger.Debugf("Returning fake pod for %s from ignored namespace %s", name, namespace)
+		return p.createIgnoredPod(namespace, name), nil
 	}
 
 	podname := utils.GetPodName(namespace, name, nil)
@@ -317,8 +384,9 @@ func (p *SaladCloudProvider) GetPodStatus(ctx context.Context, namespace string,
 	defer span.End()
 
 	if p.shouldIgnoreNamespace(namespace) {
-		p.logger.Debugf("Ignoring get status request for pod %s from namespace %s", name, namespace)
-		return nil, errdefs.NotFound("pod not found") // Return not found for ignored namespaces
+		p.logger.Debugf("Returning fake status for pod %s from ignored namespace %s", name, namespace)
+		status := p.createIgnoredPodStatus("waiting")
+		return &status, nil
 	}
 
 	podname := utils.GetPodName(namespace, name, nil)
