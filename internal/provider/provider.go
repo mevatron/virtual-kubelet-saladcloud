@@ -433,7 +433,7 @@ func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclie
 			gpuClasses = make([]string, 0)
 		}
 		containerResourceRequirement := saladclient.NewContainerResourceRequirements(int32(cpu), int32(memory), gpuClasses)
-		createContainer := saladclient.NewCreateContainer(container.Image, *containerResourceRequirement)
+		createContainer := saladclient.NewCreateContainer(container.Image, saladclient.CreateContainerResourceRequirements(*containerResourceRequirement))
 
 		createContainer.SetEnvironmentVariables(p.getContainerEnvironment(pod.ObjectMeta, container))
 		if container.Command != nil {
@@ -457,7 +457,7 @@ func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclie
 		}
 		priority, err := p.getContainerPriority(pod)
 		if err == nil && priority != nil {
-			createContainer.Priority.Set(priority)
+			createContainer.Priority = priority
 		}
 		createContainersArray = append(createContainersArray, *createContainer)
 	}
@@ -495,12 +495,11 @@ func (p *SaladCloudProvider) getWorkloadContainerLivenessProbeFrom(
 			headers = append(headers, saladclient.ContainerGroupProbeHttpHeader{Name: header.Name, Value: header.Value})
 		}
 		scheme := saladclient.CONTAINERPROBEHTTPSCHEME_HTTP
-		probeScheme := saladclient.NewNullableContainerProbeHttpScheme(&scheme)
 		httpProbe := saladclient.NewContainerGroupProbeHttp(
 			headers,
 			k8sProbe.HTTPGet.Path,
 			int32(k8sProbe.HTTPGet.Port.IntValue()),
-			*probeScheme)
+			scheme)
 		probe.SetHttp(*httpProbe)
 	}
 
@@ -552,12 +551,11 @@ func (p *SaladCloudProvider) getWorkloadContainerReadinessProbeFrom(
 			headers = append(headers, saladclient.ContainerGroupProbeHttpHeader{Name: header.Name, Value: header.Value})
 		}
 		scheme := saladclient.CONTAINERPROBEHTTPSCHEME_HTTP
-		probeScheme := saladclient.NewNullableContainerProbeHttpScheme(&scheme)
 		httpProbe := saladclient.NewContainerGroupProbeHttp(
 			headers,
 			k8sProbe.HTTPGet.Path,
 			int32(k8sProbe.HTTPGet.Port.IntValue()),
-			*probeScheme)
+			scheme)
 		probe.SetHttp(*httpProbe)
 	}
 
@@ -608,12 +606,11 @@ func (p *SaladCloudProvider) getWorkloadContainerStartupProbeFrom(
 			headers = append(headers, saladclient.ContainerGroupProbeHttpHeader{Name: header.Name, Value: header.Value})
 		}
 		scheme := saladclient.CONTAINERPROBEHTTPSCHEME_HTTP
-		probeScheme := saladclient.NewNullableContainerProbeHttpScheme(&scheme)
 		httpProbe := saladclient.NewContainerGroupProbeHttp(
 			headers,
 			k8sProbe.HTTPGet.Path,
 			int32(k8sProbe.HTTPGet.Port.IntValue()),
-			*probeScheme)
+			scheme)
 		probe.SetHttp(*httpProbe)
 	}
 
