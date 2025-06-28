@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,7 +19,6 @@ import (
 	"github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/models"
 	"github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/utils"
 	"github.com/google/uuid"
-	"github.com/pkg/errors"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/virtual-kubelet/virtual-kubelet/log"
 	nodeapi "github.com/virtual-kubelet/virtual-kubelet/node/api"
@@ -110,6 +110,33 @@ func (p *SaladCloudProvider) NotifyPods(ctx context.Context, notifierCallback fu
 	go p.podsTracker.BeginPodTracking(ctx)
 }
 
+func (p *SaladCloudProvider) logApiError(op string, resp *http.Response, origErr error, podName ...string) error {
+	pd, bodyErr := utils.GetResponseBody(resp)
+	if bodyErr != nil {
+		p.logger.Errorf("%s: failed to read response body: %v", op, bodyErr)
+	} else {
+		switch {
+		case resp != nil && resp.StatusCode == http.StatusBadRequest && pd.Type != nil && *pd.Type == "name_conflict":
+			if len(podName) > 0 {
+				p.logger.Errorf("Name %s has already been used in provider project %s/%s", podName[0], p.inputVars.OrganizationName, p.inputVars.ProjectName)
+			} else {
+				p.logger.Errorf("%s: name conflict detected", op)
+			}
+		default:
+			status := 0
+			if resp != nil {
+				status = resp.StatusCode
+			}
+			if b, err := json.Marshal(pd); err == nil {
+				p.logger.Errorf("%s: API error (status=%d): %s", op, status, b)
+			} else {
+				p.logger.Errorf("%s: API error (status=%d): %#v", op, status, pd)
+			}
+		}
+	}
+	return errors.Join(fmt.Errorf("%s", op), origErr)
+}
+
 func (p *SaladCloudProvider) CreatePod(ctx context.Context, pod *corev1.Pod) error {
 	_, span := trace.StartSpan(ctx, "CreatePod")
 	defer span.End()
@@ -127,25 +154,7 @@ func (p *SaladCloudProvider) CreatePod(ctx context.Context, pod *corev1.Pod) err
 		createContainerGroup[0],
 	).Execute()
 	if err != nil {
-		// Get response body for error info
-		pd, err := utils.GetResponseBody(r)
-		if err != nil {
-			p.logger.Errorf("CreatePod: %s", err)
-			return err
-		}
-
-		// Also handle 403 and 429?
-		if r != nil && r.StatusCode == http.StatusBadRequest {
-			if *pd.Type == "name_conflict" {
-				// The exciting duplicate name condition!
-				p.logger.Errorf("Name %s has already been used in provider project %s/%s", pod.Name, p.inputVars.OrganizationName, p.inputVars.ProjectName)
-			} else {
-				p.logger.Errorf("Error type %s in `ContainerGroupsAPI.ContainerGroupPrototype`", *pd.Type)
-			}
-		} else {
-			p.logger.Errorf("Error when calling `ContainerGroupsAPI.ContainerGroupPrototype`", r)
-		}
-		return err
+		return p.logApiError("CreatePod:CreateContainerGroup", r, err, pod.Name)
 	}
 
 	now := metav1.NewTime(time.Now())
@@ -194,15 +203,7 @@ func (p *SaladCloudProvider) DeletePod(ctx context.Context, pod *corev1.Pod) err
 	pod.Status.Phase = corev1.PodSucceeded
 	pod.Status.Reason = "Pod Deleted"
 	if err != nil {
-		// Get response body for error info
-		pd, err := utils.GetResponseBody(response)
-		if err != nil {
-			p.logger.Errorf("`ContainerGroupsAPI.DeletePod`: %s", err)
-			return err
-		}
-
-		p.logger.Errorf("`ContainerGroupsAPI.DeletePod`: Error: %+v", *pd)
-		return err
+		return p.logApiError("DeletePod:DeleteContainerGroup", response, err, pod.Name)
 	}
 	now := metav1.Now()
 	for idx := range pod.Status.ContainerStatuses {
@@ -223,19 +224,7 @@ func (p *SaladCloudProvider) GetPod(_ context.Context, namespace string, name st
 	podname := utils.GetPodName(namespace, name, nil)
 	resp, r, err := saladclient.NewAPIClient(saladclient.NewConfiguration()).ContainerGroupsAPI.GetContainerGroup(p.contextWithAuth(), p.inputVars.OrganizationName, p.inputVars.ProjectName, podname).Execute()
 	if err != nil {
-		// Get response body for error info
-		pd, err := utils.GetResponseBody(r)
-		if err != nil {
-			p.logger.Errorf("`ContainerGroupsAPI.GetPod`: %s", err)
-			return nil, err
-		}
-
-		if r != nil && r.StatusCode == http.StatusNotFound {
-			p.logger.Warnf("`ContainerGroupsAPI.GetPod`: %s not found", podname)
-		} else {
-			p.logger.Errorf("`ContainerGroupsAPI.GetPod`: Error: %+v", *pd)
-		}
-		return nil, err
+		return nil, p.logApiError("GetPod:GetContainerGroup", r, err, podname)
 	}
 	startTime := metav1.NewTime(resp.CreateTime)
 	pod := &corev1.Pod{
@@ -283,23 +272,10 @@ func (p *SaladCloudProvider) GetPodStatus(ctx context.Context, namespace string,
 		GetContainerGroup(p.contextWithAuth(), p.inputVars.OrganizationName, p.inputVars.ProjectName, podname).
 		Execute()
 	if err != nil {
-		// Get response body for error info
-		pd, err := utils.GetResponseBody(response)
-		if err != nil {
-			p.logger.Errorf("GetPodStatus: %s", err)
-			return nil, err
-		}
-
-		if response != nil && response.StatusCode == http.StatusNotFound {
-			p.logger.WithField("namespace", namespace).
-				WithField("name", podname).
-				Warnf("Not Found")
-		} else {
-			p.logger.WithField("namespace", namespace).
-				WithField("name", name).
-				Errorf("ContainerGroupsAPI.GetPodStatus: %+v ", *pd)
-		}
-		return nil, models.NewSaladCloudError(err, response)
+		return nil, models.NewSaladCloudError(
+			p.logApiError("GetPodStatus:GetContainerGroup", response, err, podname),
+			response,
+		)
 	}
 
 	phase := utils.GetPodPhaseFromContainerGroupState(containerGroup.CurrentState)
@@ -728,7 +704,7 @@ func (p *SaladCloudProvider) getCountryCodes(pod *corev1.Pod) ([]saladclient.Cou
 	for _, code := range codes {
 		cc, err := saladclient.NewCountryCodeFromValue(strings.ToLower(code))
 		if err != nil {
-			return []saladclient.CountryCode{}, errors.WithMessage(err, "Invalid country code provided: "+code)
+			return []saladclient.CountryCode{}, fmt.Errorf("invalid country code provided: %s: %w", code, err)
 		}
 		countryCodes = append(countryCodes, *cc)
 	}
