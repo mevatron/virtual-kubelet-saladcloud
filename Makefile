@@ -9,6 +9,7 @@
 # run - run the kubelet in the foreground with detailed logging
 # status - "kubectl get node; kubectl get pod"
 
+NAMESPACE ?= saladtechnologies
 IMAGE_TAG ?= latest
 CMDS := bin/virtual-kubelet-saladcloud
 
@@ -31,7 +32,7 @@ build: $(CMDS)
 .PHONY: build-image
 build-image:
 	docker build \
-		--tag ghcr.io/saladtechnologies/virtual-kubelet-saladcloud:$(IMAGE_TAG) \
+		--tag ghcr.io/$(NAMESPACE)/virtual-kubelet-saladcloud:$(IMAGE_TAG) \
 		--file docker/Dockerfile \
 		--build-arg VERSION_FLAGS=$(VERSION_FLAGS) \
 		.
