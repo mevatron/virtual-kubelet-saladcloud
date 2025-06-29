@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	saladclient "github.com/SaladTechnologies/salad-client"
+	saladclient "github.com/mevatron/salad-client"
 	corev1 "k8s.io/api/core/v1"
 )
 

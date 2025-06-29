@@ -3,10 +3,9 @@ module github.com/SaladTechnologies/virtual-kubelet-saladcloud
 go 1.24.1
 
 require (
-	github.com/SaladTechnologies/salad-client v0.9.0-alpha.11
 	github.com/google/uuid v1.6.0
+	github.com/mevatron/salad-client v0.0.0-20250628031239-8c4dbfef90fd
 	github.com/mitchellh/go-homedir v1.1.0
-	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_model v0.6.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
@@ -67,6 +66,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.21.1 // indirect
 	github.com/prometheus/common v0.63.0 // indirect

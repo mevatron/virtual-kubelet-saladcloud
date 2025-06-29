@@ -11,7 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	saladclient "github.com/SaladTechnologies/salad-client"
+	saladclient "github.com/mevatron/salad-client"
 	// "github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/provider"
 	"github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/models"
 	"github.com/virtual-kubelet/virtual-kubelet/node/nodeutil"

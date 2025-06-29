@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	saladclient "github.com/mevatron/salad-client"
 	"io"
 	"net/http"
 	"strconv"
@@ -15,7 +16,6 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
-	saladclient "github.com/SaladTechnologies/salad-client"
 	"github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/models"
 	"github.com/SaladTechnologies/virtual-kubelet-saladcloud/internal/utils"
 	"github.com/google/uuid"
