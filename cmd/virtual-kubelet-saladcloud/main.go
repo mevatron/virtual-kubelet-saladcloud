@@ -62,7 +62,7 @@ func defaultInputs() models.InputVars {
 		TaintValue:        "saladcloud",
 		ProjectName:       "",
 		ApiKey:            "",
-		IgnoredNamespaces: "kube-system,kube-public,kube-node-lease",
+		IgnoredNamespaces: "",
 	}
 }
 

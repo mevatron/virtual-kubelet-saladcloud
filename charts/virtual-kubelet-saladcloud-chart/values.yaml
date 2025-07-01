@@ -70,7 +70,7 @@ salad:
   nodeName: ""
 
   # -- The namespaces from which to ignore requests.
-  ignoredNamespaces: "kube-system,kube-public,kube-node-lease"
+  ignoredNamespaces: ""
 
   # -- Specifies whether debug logging is enabled in the SaladCloud Virtual Kubelet.
   debug: false
