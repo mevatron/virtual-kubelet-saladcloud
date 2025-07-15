@@ -61,6 +61,23 @@ const (
 	defaultOperatingSystem = "Linux"
 )
 
+const (
+	saladMinStorageBytes int64 = 1 << 30   // 1 GiB
+	saladMaxStorageBytes int64 = 250 << 30 // 250 GiB
+)
+
+// getEphemeralStorageBytes sums all container-level `ephemeral-storage` requests
+// in the given pod spec and returns the total in bytes.
+func getEphemeralStorageBytes(spec corev1.PodSpec) int64 {
+	var total int64
+	for _, c := range spec.Containers {
+		if qty, ok := c.Resources.Requests[corev1.ResourceEphemeralStorage]; ok {
+			total += qty.Value()
+		}
+	}
+	return total
+}
+
 func NewSaladCloudProvider(ctx context.Context, inputVars models.InputVars, providerConfig nodeutil.ProviderConfig) (*SaladCloudProvider, error) {
 	var ignoredNamespaces []string
 	if inputVars.IgnoredNamespaces != "" {
@@ -524,6 +541,19 @@ func (p *SaladCloudProvider) getContainerEnvironment(podMetadata metav1.ObjectMe
 
 func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclient.CreateContainer {
 	createContainersArray := make([]saladclient.CreateContainer, 0)
+
+	storageBytes := getEphemeralStorageBytes(pod.Spec)
+	if storageBytes > 0 {
+		if storageBytes < saladMinStorageBytes {
+			storageBytes = saladMinStorageBytes
+		}
+		if storageBytes > saladMaxStorageBytes {
+			storageBytes = saladMaxStorageBytes
+		}
+	} else {
+		storageBytes = saladMinStorageBytes
+	}
+
 	for _, container := range pod.Spec.Containers {
 		cpu, memory := utils.GetPodResource(pod.Spec)
 		gpuClasses, err := p.getGPUClasses(pod)
@@ -531,6 +561,8 @@ func (p *SaladCloudProvider) createContainersObject(pod *corev1.Pod) []saladclie
 			gpuClasses = make([]string, 0)
 		}
 		containerResourceRequirement := saladclient.NewContainerResourceRequirements(int32(cpu), int32(memory), gpuClasses)
+		containerResourceRequirement.StorageAmount = &storageBytes
+
 		createContainer := saladclient.NewCreateContainer(container.Image, saladclient.CreateContainerResourceRequirements(*containerResourceRequirement))
 
 		createContainer.SetEnvironmentVariables(p.getContainerEnvironment(pod.ObjectMeta, container))
