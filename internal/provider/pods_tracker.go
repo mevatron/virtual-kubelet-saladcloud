@@ -111,7 +111,7 @@ func (pt *PodsTracker) handlePodUpdates(pod *corev1.Pod) bool {
 	}
 	if err != nil {
 		var apiError *models.APIError
-		if errors.As(err, &apiError) && pod.Status.Phase == corev1.PodRunning && apiError.StatusCode == http.StatusNotFound {
+		if errors.As(err, &apiError) && apiError.StatusCode == http.StatusNotFound {
 			return pt.handlePodNotFound(pod)
 		}
 		pt.logger.WithError(err).Errorf("handlePodStatusUpdate: Failed to retrieve pod %v status from provider", pod.Name)
